@@ -593,6 +593,28 @@ var _ = U{}.T2
 `,
 			},
 		},
+		// Renaming of type with comments used as embedded field.
+		{
+			ctxt: main(`package main
+
+// T a comment
+type T int
+type U struct { T }
+
+var _ = U{}.T
+`),
+			from: "main.T", to: "T2",
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+// T2 a comment
+type T2 int
+type U struct{ T2 }
+
+var _ = U{}.T2
+`,
+			},
+		},
 		// Renaming of embedded field.
 		{
 			ctxt: main(`package main
@@ -613,6 +635,28 @@ var _ = U{}.T2
 `,
 			},
 		},
+		// Renaming of embedded field with comment.
+		{
+			ctxt: main(`package main
+
+// T a comment
+type T int
+type U struct { T }
+
+var _ = U{}.T
+`),
+			offset: "/go/src/main/0.go:#73", to: "T2", // T in "U{}.T"
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+// T2 a comment
+type T2 int
+type U struct{ T2 }
+
+var _ = U{}.T2
+`,
+			},
+		},
 		// Renaming of pointer embedded field.
 		{
 			ctxt: main(`package main
@@ -626,6 +670,28 @@ var _ = U{}.T
 			want: map[string]string{
 				"/go/src/main/0.go": `package main
 
+type T2 int
+type U struct{ *T2 }
+
+var _ = U{}.T2
+`,
+			},
+		},
+		// Renaming of pointer embedded field with comments
+		{
+			ctxt: main(`package main
+
+// T a comment
+type T int
+type U struct { *T }
+
+var _ = U{}.T
+`),
+			offset: "/go/src/main/0.go:#74", to: "T2", // T in "U{}.T"
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+// T2 a comment
 type T2 int
 type U struct{ *T2 }
 
@@ -675,6 +741,54 @@ func f() {
 `,
 			},
 		},
+		// Lexical scope tests with comment
+		{
+			ctxt: main(`package main
+
+// Y a comment
+var Y int
+
+func f() {
+	print(Y)
+	// Y a comment in f
+	Y := ""
+	print(Y)
+}
+`),
+			from: "main.Y", to: "X",
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+// X a comment
+var X int
+
+func f() {
+	print(X)
+	// Y a comment in f
+	Y := ""
+	print(Y)
+}
+`,
+			},
+		},
+		{
+			from: "main.f::Y", to: "X",
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+// Y a comment
+var Y int
+
+func f() {
+	print(Y)
+	// X a comment in f
+	X := ""
+	print(X)
+}
+`,
+			},
+		},
+
 		// Renaming of typeswitch vars (a corner case).
 		{
 			ctxt: main(`package main
@@ -732,7 +846,67 @@ func f(z interface{}) {
 }
 `},
 		},
+		// Renaming of typeswitch vars (a corner case) with comments.
+		{
+			ctxt: main(`package main
 
+func f(z interface{}) {
+	// y with comment
+	switch y := z.(type) {
+	case int:
+		print(y)
+	default:
+		print(y)
+	}
+}
+`),
+			offset: "/go/src/main/0.go:#65", to: "x", // def of y
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+func f(z interface{}) {
+	// x with comment
+	switch x := z.(type) {
+	case int:
+		print(x)
+	default:
+		print(x)
+	}
+}
+`},
+		},
+		{
+			offset: "/go/src/main/0.go:#100", to: "x", // ref of y in case int
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+func f(z interface{}) {
+	// x with comment
+	switch x := z.(type) {
+	case int:
+		print(x)
+	default:
+		print(x)
+	}
+}
+`},
+		},
+		{
+			offset: "/go/src/main/0.go:#121", to: "x", // ref of y in default case
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+func f(z interface{}) {
+	// x with comment
+	switch x := z.(type) {
+	case int:
+		print(x)
+	default:
+		print(x)
+	}
+}
+`},
+		},
 		// Renaming of embedded field that is a qualified reference.
 		// (Regression test for bug 8924.)
 		{
@@ -749,6 +923,36 @@ type _ struct{ *foo.T }
 			want: map[string]string{
 				"/go/src/foo/0.go": `package foo
 
+type U int
+`,
+				"/go/src/main/0.go": `package main
+
+import "foo"
+
+type _ struct{ *foo.U }
+`,
+			},
+		},
+
+		// Renaming of embedded field that is a qualified reference with comment.
+		// (Regression test for bug 8924.)
+		{
+			ctxt: fakeContext(map[string][]string{
+				"foo": {`package foo
+// T a comment
+type T int`},
+				"main": {`package main
+
+import "foo"
+
+type _ struct{ *foo.T }
+`},
+			}),
+			offset: "/go/src/main/0.go:#48", to: "U", // the "T" in *foo.T
+			want: map[string]string{
+				"/go/src/foo/0.go": `package foo
+
+// U a comment
 type U int
 `,
 				"/go/src/main/0.go": `package main
@@ -786,6 +990,35 @@ type V struct{ *foo.U }
 `,
 			},
 		},
+		//With comment
+		{
+			ctxt: fakeContext(map[string][]string{
+				"foo": {`package foo
+// T a comment
+type T int`},
+				"main": {`package main
+
+import "foo"
+
+type V struct{ *foo.T }
+`},
+			}),
+			from: "(main.V).T", to: "U", // the "T" in *foo.T
+			want: map[string]string{
+				"/go/src/foo/0.go": `package foo
+
+// U a comment
+type U int
+`,
+				"/go/src/main/0.go": `package main
+
+import "foo"
+
+type V struct{ *foo.U }
+`,
+			},
+		},
+		//No Ref
 		{
 			ctxt: fakeContext(map[string][]string{
 				"foo": {`package foo; type T int`},
@@ -800,6 +1033,34 @@ type V struct{ foo.T }
 			want: map[string]string{
 				"/go/src/foo/0.go": `package foo
 
+type U int
+`,
+				"/go/src/main/0.go": `package main
+
+import "foo"
+
+type V struct{ foo.U }
+`,
+			},
+		},
+		//No Ref with comment
+		{
+			ctxt: fakeContext(map[string][]string{
+				"foo": {`package foo; 
+// T a comment
+type T int`},
+				"main": {`package main
+
+import "foo"
+
+type V struct{ foo.T }
+`},
+			}),
+			from: "(main.V).T", to: "U", // the "T" in foo.T
+			want: map[string]string{
+				"/go/src/foo/0.go": `package foo
+
+// U a comment
 type U int
 `,
 				"/go/src/main/0.go": `package main
@@ -923,6 +1184,160 @@ var _, _ J = B(0), C(0)
 `,
 			},
 		},
+		// Interface method renaming with comments
+		{
+			ctxt: fakeContext(map[string][]string{
+				"main": {`package main
+type I interface { 
+	// f with comment
+	f() 
+}
+type J interface { 
+	// f with comment
+	f(); 
+	// g with comment
+	g() 
+}
+type A int
+// f a comment
+func (A) f()
+type B int
+// f a comment
+func (B) f()
+// g a comment
+func (B) g()
+type C int
+// f a comment
+func (C) f()
+// g a comment
+func (C) g()
+var _, _ I = A(0), B(0)
+var _, _ J = B(0), C(0)
+`,
+				},
+			}),
+			offset: "/go/src/main/0.go:#53", to: "F", // abstract method I.f
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+type I interface {
+	// F with comment
+	F()
+}
+type J interface {
+	// F with comment
+	F()
+	// g with comment
+	g()
+}
+type A int
+
+// F a comment
+func (A) F()
+
+type B int
+
+// F a comment
+func (B) F()
+
+// g a comment
+func (B) g()
+
+type C int
+
+// F a comment
+func (C) F()
+
+// g a comment
+func (C) g()
+
+var _, _ I = A(0), B(0)
+var _, _ J = B(0), C(0)
+`,
+			},
+		},
+		{
+			offset: "/go/src/main/0.go:#100", to: "F", // abstract method J.f
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+type I interface {
+	// F with comment
+	F()
+}
+type J interface {
+	// F with comment
+	F()
+	// g with comment
+	g()
+}
+type A int
+
+// F a comment
+func (A) F()
+
+type B int
+
+// F a comment
+func (B) F()
+
+// g a comment
+func (B) g()
+
+type C int
+
+// F a comment
+func (C) F()
+
+// g a comment
+func (C) g()
+
+var _, _ I = A(0), B(0)
+var _, _ J = B(0), C(0)
+`,
+			},
+		},
+		{
+			offset: "/go/src/main/0.go:#126", to: "G", // abstract method J.g
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+type I interface {
+	// f with comment
+	f()
+}
+type J interface {
+	// f with comment
+	f()
+	// G with comment
+	G()
+}
+type A int
+
+// f a comment
+func (A) f()
+
+type B int
+
+// f a comment
+func (B) f()
+
+// G a comment
+func (B) G()
+
+type C int
+
+// f a comment
+func (C) f()
+
+// G a comment
+func (C) G()
+
+var _, _ I = A(0), B(0)
+var _, _ J = B(0), C(0)
+`,
+			},
+		},
 		// Indirect coupling of I.f to C.f from D->I assignment and anonymous field of D.
 		{
 			ctxt: fakeContext(map[string][]string{
@@ -945,6 +1360,45 @@ type I interface {
 }
 type C int
 
+func (C) F()
+
+type D struct{ C }
+
+var _ I = D{}
+`,
+			},
+		},
+		// Indirect coupling of I.f to C.f from D->I assignment and anonymous field of D with comment
+		{
+			ctxt: fakeContext(map[string][]string{
+				"main": {`
+package main
+type I interface { 
+	// f with comment
+	f()
+}
+
+type C int
+
+// f with comment
+func (C) f()
+type D struct{C}
+var _ I = D{}
+`,
+				},
+			}),
+			offset: "/go/src/main/0.go:#54", to: "F", // abstract method I.f
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+type I interface {
+	// F with comment
+	F()
+}
+
+type C int
+
+// F with comment
 func (C) F()
 
 type D struct{ C }
@@ -980,6 +1434,37 @@ var _ int = C{}.g()
 `,
 			},
 		},
+		// Interface embedded in struct.  No conflict if C need not satisfy I.
+		{
+			ctxt: fakeContext(map[string][]string{
+				"main": {`
+package main
+type I interface {
+	// f with comment
+	f()
+}
+type C struct{I}
+func (C) g() int
+var _ int = C{}.g()
+`,
+				},
+			}),
+			offset: "/go/src/main/0.go:#53", to: "g", // abstract method I.f
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+type I interface {
+	// g with comment
+	g()
+}
+type C struct{ I }
+
+func (C) g() int
+
+var _ int = C{}.g()
+`,
+			},
+		},
 		// A type assertion causes method coupling iff signatures match.
 		{
 			ctxt: fakeContext(map[string][]string{
@@ -1005,6 +1490,39 @@ var _ = I(nil).(J)
 `,
 			},
 		},
+		// A type assertion causes method coupling iff signatures match with comment
+		{
+			ctxt: fakeContext(map[string][]string{
+				"main": {`package main
+type I interface{
+	// f with comment
+	f()
+}
+type J interface{
+	// f with comment
+	f()
+}
+var _ = I(nil).(J)
+`,
+				},
+			}),
+			offset: "/go/src/main/0.go:#51", to: "g", // abstract method I.f
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+type I interface {
+	// g with comment
+	g()
+}
+type J interface {
+	// g with comment
+	g()
+}
+
+var _ = I(nil).(J)
+`,
+			},
+		},
 		// Impossible type assertion: no method coupling.
 		{
 			ctxt: fakeContext(map[string][]string{
@@ -1023,6 +1541,39 @@ type I interface {
 	g()
 }
 type J interface {
+	f() int
+}
+
+var _ = I(nil).(J)
+`,
+			},
+		},
+		// Impossible type assertion: no method coupling with comments
+		{
+			ctxt: fakeContext(map[string][]string{
+				"main": {`package main
+type I interface{
+	// f with comment
+	f()
+}
+type J interface{
+	// f with comment
+	f()int
+}
+var _ = I(nil).(J)
+`,
+				},
+			}),
+			offset: "/go/src/main/0.go:#51", to: "g", // abstract method I.f
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+type I interface {
+	// g with comment
+	g()
+}
+type J interface {
+	// f with comment
 	f() int
 }
 
@@ -1061,6 +1612,50 @@ var _ = I(C(0)).(J)
 `,
 			},
 		},
+		// Impossible type assertion: no method coupling C.f<->J.f. with comments
+		{
+			ctxt: fakeContext(map[string][]string{
+				"main": {`package main
+type I interface{
+	// f with comment
+	f()
+}
+type C int
+
+// f with comment
+func (C) f()
+
+type J interface{
+	// f with comment
+	f()int
+}
+
+var _ = I(C(0)).(J)
+`,
+				},
+			}),
+			offset: "/go/src/main/0.go:#51", to: "g", // abstract method I.f
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+type I interface {
+	// g with comment
+	g()
+}
+type C int
+
+// g with comment
+func (C) g()
+
+type J interface {
+	// f with comment
+	f() int
+}
+
+var _ = I(C(0)).(J)
+`,
+			},
+		},
 		// Progress after "soft" type errors (Go issue 14596).
 		{
 			ctxt: fakeContext(map[string][]string{
@@ -1081,6 +1676,103 @@ func main() {
 	var unused, y int
 	print(y)
 }
+`,
+			},
+		},
+	} {
+		if test.ctxt != nil {
+			ctxt = test.ctxt
+		}
+
+		got := make(map[string]string)
+		writeFile = func(filename string, content []byte) error {
+			got[filepath.ToSlash(filename)] = string(content)
+			return nil
+		}
+
+		err := Main(ctxt, test.offset, test.from, test.to)
+		var prefix string
+		if test.offset == "" {
+			prefix = fmt.Sprintf("-from %q -to %q", test.from, test.to)
+		} else {
+			prefix = fmt.Sprintf("-offset %q -to %q", test.offset, test.to)
+		}
+		if err != nil {
+			t.Errorf("%s: unexpected error: %s", prefix, err)
+			continue
+		}
+
+		for file, wantContent := range test.want {
+			gotContent, ok := got[file]
+			delete(got, file)
+			if !ok {
+				t.Errorf("%s: file %s not rewritten", prefix, file)
+				continue
+			}
+			if gotContent != wantContent {
+				t.Errorf("%s: rewritten file %s does not match expectation; got <<<%s>>>\n"+
+					"want <<<%s>>>", prefix, file, gotContent, wantContent)
+			}
+		}
+		// got should now be empty
+		for file := range got {
+			t.Errorf("%s: unexpected rewrite of file %s", prefix, file)
+		}
+	}
+}
+
+func TestMultipleComments(t *testing.T) {
+	defer func(savedWriteFile func(string, []byte) error) {
+		writeFile = savedWriteFile
+	}(writeFile)
+
+	var ctxt *build.Context
+	for _, test := range []struct {
+		ctxt             *build.Context    // nil => use previous
+		offset, from, to string            // values of the -from/-offset and -to flags
+		want             map[string]string // contents of updated files
+	}{
+		// Renaming of type with comments used as embedded field.
+		{
+			ctxt: main(`package main
+
+// Block of comment before  T
+
+// T a comment
+// Block of explanations
+/* bigger block
+with multiple lines
+*/
+type T int
+type U struct {
+	// T in-struct comment
+	T
+	// v other comment
+	v T
+}
+
+var _ = U{}.T
+`),
+			from: "main.T", to: "T2",
+			want: map[string]string{
+				"/go/src/main/0.go": `package main
+
+// Block of comment before  T
+
+// T2 a comment
+// Block of explanations
+/* bigger block
+with multiple lines
+*/
+type T2 int
+type U struct {
+	// T2 in-struct comment
+	T2
+	// v other comment
+	v T2
+}
+
+var _ = U{}.T2
 `,
 			},
 		},

@@ -216,6 +216,12 @@ func importName(iprog *loader.Program, info *loader.PackageInfo, fromPath, fromN
 	return nil
 }
 
+// Main safasd
+/*enclosingBlock//Block about main
+
+//Main comment
+asdfasd
+*/
 func Main(ctxt *build.Context, offsetFlag, fromFlag, to string) error {
 	// -- Parse the -from or -offset specifier ----------------------------
 
@@ -455,10 +461,87 @@ func (r *renamer) update() error {
 	var nidents int
 	var filesToUpdate = make(map[*token.File]bool)
 	for _, info := range r.packages {
+		// map ident and comment
+		mapCommentGrpPerIdent := map[*ast.Ident]*ast.Comment{}
+		mapCommentGrpPerPos := map[token.Pos]*ast.Comment{}
+		for _, f := range info.Files {
+			cmap := ast.NewCommentMap(r.iprog.Fset, f, f.Comments)
+			for k, v := range cmap {
+				var commentGrp *ast.CommentGroup
+				var id *ast.Ident
+				switch k.(type) {
+				case *ast.TypeSwitchStmt:
+					obj := k.(*ast.TypeSwitchStmt)
+					if obj.Assign != nil {
+						if len(v[0].List) > 0 {
+							mapCommentGrpPerPos[obj.Assign.Pos()] = v[0].List[0]
+						}
+					}
+				case *ast.Field:
+					obj := k.(*ast.Field)
+					if len(obj.Names) == 1 {
+						id = obj.Names[0]
+						commentGrp = obj.Doc
+					} else if obj.Type != nil {
+						if len(v[0].List) > 0 {
+							mapCommentGrpPerPos[obj.Type.Pos()] = v[0].List[0]
+						}
+					}
+				case *ast.FuncDecl:
+					obj := k.(*ast.FuncDecl)
+					id = obj.Name
+					commentGrp = obj.Doc
+				case *ast.TypeSpec:
+					obj := k.(*ast.TypeSpec)
+					id = obj.Name
+					commentGrp = obj.Doc
+				case *ast.ValueSpec:
+					obj := k.(*ast.ValueSpec)
+					if len(obj.Names) == 1 {
+						id = obj.Names[0]
+						commentGrp = obj.Doc
+					}
+				case *ast.GenDecl:
+					obj := k.(*ast.GenDecl)
+					if len(obj.Specs) == 1 {
+						switch obj.Specs[0].(type) {
+						case *ast.TypeSpec:
+							decl := obj.Specs[0].(*ast.TypeSpec)
+							id = decl.Name
+							if decl.Comment != nil {
+								commentGrp = decl.Doc
+							} else {
+								commentGrp = obj.Doc
+							}
+						case *ast.ValueSpec:
+							val := obj.Specs[0].(*ast.ValueSpec)
+							if len(val.Names) == 1 {
+								id = val.Names[0]
+								if val.Comment != nil {
+									commentGrp = val.Comment
+								} else {
+									commentGrp = obj.Doc
+								}
+							}
+						}
+					}
+				default:
+					if len(v) >= 1 {
+						if len(v[0].List) > 0 {
+							mapCommentGrpPerPos[k.Pos()] = v[0].List[0]
+						}
+					}
+				}
+				if id != nil && commentGrp != nil && len(commentGrp.List) > 0 {
+					mapCommentGrpPerIdent[id] = commentGrp.List[0]
+				}
+			}
+		}
 		// Mutate the ASTs and note the filenames.
 		for id, obj := range info.Defs {
 			if r.objsToUpdate[obj] {
 				nidents++
+				updateComment(id, r.to, mapCommentGrpPerIdent, mapCommentGrpPerPos)
 				id.Name = r.to
 				filesToUpdate[r.iprog.Fset.File(id.Pos())] = true
 			}
@@ -466,6 +549,7 @@ func (r *renamer) update() error {
 		for id, obj := range info.Uses {
 			if r.objsToUpdate[obj] {
 				nidents++
+				updateComment(id, r.to, mapCommentGrpPerIdent, mapCommentGrpPerPos)
 				id.Name = r.to
 				filesToUpdate[r.iprog.Fset.File(id.Pos())] = true
 			}
@@ -511,6 +595,53 @@ func (r *renamer) update() error {
 		return fmt.Errorf("failed to rewrite %d file%s", nerrs, plural(nerrs))
 	}
 	return nil
+}
+
+func updateComment(id *ast.Ident, newName string, mapCommentGrpPerIdent map[*ast.Ident]*ast.Comment, mapCommentGrpPerPos map[token.Pos]*ast.Comment) {
+	// validation function for the comment: The name to be substituted must be the first word
+	checkFirstWords := func(fullText, name string) bool {
+		tokens := strings.Split(fullText, " ")
+		if len(tokens) == 0 {
+			return false
+		}
+		if len(tokens) == 1 {
+			return strings.Contains(tokens[0], name)
+		}
+		if len(tokens) >= 2 {
+			return strings.Contains(tokens[1], name)
+		}
+		return false
+		// Other cases does not deserve modification has they do not respect effective go recommendation
+		// https://golang.org/doc/effective_go.html#commentary
+		// and will be highlighted by go lint
+	}
+
+	// Try first with id
+	if comment, ok := mapCommentGrpPerIdent[id]; ok && comment != nil {
+		if checkFirstWords(comment.Text, id.Name) {
+			comment.Text = strings.Replace(comment.Text, id.Name, newName, 1)
+		}
+		return
+	}
+
+	// Maybe we can match thanks to position
+	if comment, ok := mapCommentGrpPerPos[id.Pos()]; ok && comment != nil {
+		if checkFirstWords(comment.Text, id.Name) {
+			comment.Text = strings.Replace(comment.Text, id.Name, newName, 1)
+		}
+		return
+	}
+
+	// Last chance with the position of the Declaration of the Object
+	if id.Obj != nil && id.Obj.Decl != nil {
+		if node, ok := id.Obj.Decl.(ast.Node); ok {
+			if comment, ok := mapCommentGrpPerPos[node.Pos()]; ok && comment != nil {
+				if checkFirstWords(comment.Text, id.Name) {
+					comment.Text = strings.Replace(comment.Text, id.Name, newName, 1)
+				}
+			}
+		}
+	}
 }
 
 func plural(n int) string {
